@@ -13,7 +13,7 @@
     // For nodejs:
     // "lib": ["esnext"],
     "types": ["node", "vitest"],
-    // and npm install -D @types/node
+    // and npm install -D @types/nodeы
 
     // Other Outputs
     "sourceMap": true,
