@@ -118,3 +118,14 @@ const usersArray = [
 ];
 
 console.log(findById(usersArray, 2));
+
+export {
+    createUser,
+    createBook,
+    calculateArea,
+    getStatusColor,
+    capitalize,
+    trimAndFormat,
+    getFirstElement,
+    findById
+};
