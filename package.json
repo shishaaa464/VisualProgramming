@@ -1,5 +1,5 @@
 {
-  "name": "lab3",
+  "name": "lab5",
   "version": "1.0.0",
   "description": "CSV to JSON converter with tests",
   "main": "dist/index.js",
