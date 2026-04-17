@@ -1,64 +1,103 @@
-import { useEffect, useState } from 'react';
-import BookCard from './BookCard';
-import { fetchBooks, fetchBookCoverByIsbn } from './bookApi';
-import type { BookWithCover } from './Book';
+import React, { useState, useEffect, useCallback } from 'react';
+import axios from 'axios';
+import mockData from './mocks/weatherMock.json';
+import type { IForecastResponse, IAirPollution } from './types';
+import WeatherIcon from './components/WeatherIcon';
+import SearchBar from './components/SearchBar';
+import './App.css';
 
-function App() {
-    const [books, setBooks] = useState<BookWithCover[]>([]);
-    const [loading, setLoading] = useState(true);
+const API_KEY = '66002e8c2ac257bbeeb4aa01d063820c';
 
-    useEffect(() => {
-        const loadBooks = async () => {
-            try {
-                setLoading(true);
-                const booksData = await fetchBooks();
-                const limitedBooks = booksData.slice(0, 50);
+const App: React.FC = () => {
+  const [city, setCity] = useState('Новокузнецк');
+  const [weather, setWeather] = useState<IForecastResponse | null>(null);
+  const [air, setAir] = useState<IAirPollution | null>(null);
 
-                setBooks(limitedBooks.map(book => ({ ...book, coverImage: undefined })));
-                setLoading(false);
+  const fetchData = useCallback(async () => {
+    // setWeather(mockData as any); return; 
+    try {
+      const geoRes = await axios.get(
+        `https://api.openweathermap.org/geo/1.0/direct?q=${city}&limit=1&appid=${API_KEY}`
+      );
 
-                for (const book of limitedBooks) {
-                    const coverImage = await fetchBookCoverByIsbn(book.isbn);
-                    setBooks(prev => prev.map(b =>
-                        b.id === book.id ? { ...b, coverImage: coverImage || undefined } : b
-                    ));
-                }
-            } catch (err) {
-                console.error(err);
-                setLoading(false);
-            }
-        };
-        loadBooks();
-    }, []);
+      if (!geoRes.data || geoRes.data.length === 0) return;
 
-    if (loading) {
-        return (
-            <div className="min-h-screen bg-stone-100 flex items-center justify-center">
-                <div className="text-center">
-                    <div className="w-12 h-12 border-4 border-stone-400 border-t-stone-800 rounded-full animate-spin mx-auto mb-4"></div>
-                    <p className="text-stone-500">Загрузка книг...</p>
-                </div>
-            </div>
-        );
+      const { lat, lon } = geoRes.data[0];
+
+      const [weatherRes, airRes] = await Promise.all([
+        axios.get(`https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&units=metric&lang=ru&appid=${API_KEY}`),
+        axios.get(`https://api.openweathermap.org/data/2.5/air_pollution?lat=${lat}&lon=${lon}&appid=${API_KEY}`)
+      ]);
+
+      setWeather(weatherRes.data);
+      setAir(airRes.data);
+
+    } catch (err) {
+      console.error("Ошибка запроса, используем локальные моки:", err);
+      setWeather(mockData as any);
     }
+  }, [city]);
 
-    return (
-        <div className="min-h-screen bg-stone-100 p-8">
-            <h1 className="text-4xl font-serif font-black text-center mb-12 text-stone-800 border-b-2 border-stone-300 pb-4 max-w-2xl mx-auto">
-                КАТАЛОГ КНИГ
-            </h1>
-            <div className="flex flex-wrap gap-6 justify-center">
-                {books.map((book) => (
-                    <BookCard
-                        key={book.id}
-                        title={book.title}
-                        authors={book.authors}
-                        coverId={book.id % 1000000}
-                    />
-                ))}
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 3 * 60 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
+
+  useEffect(() => {
+    (window as any).searchCity = (cityName: string) => {
+      setCity(cityName);
+    };
+  }, []);
+
+  const current = weather?.list[0];
+  const theme = current?.weather[0].main.toLowerCase() || 'default';
+
+  return (
+    <div className={`app-container ${theme}`}>
+      <SearchBar onSearch={setCity} />
+
+      {current && (
+        <div className="weather-card">
+          <h2 className="city-name">{city.charAt(0).toUpperCase() + city.slice(1)}</h2>
+
+          <p className="date">
+            {new Date().toLocaleDateString('ru-RU', { weekday: 'long', day: 'numeric' })}
+          </p>
+
+          <div className="main-info">
+            <WeatherIcon iconId={current.weather[0].icon} size="large" />
+            <h1 className="temp">{Math.round(current.main.temp)}°</h1>
+            <p className="description">{current.weather[0].description}</p>
+          </div>
+
+          <div className="details-grid">
+            <div className="detail-item">
+              <span>💧 {current.main.humidity}%</span>
             </div>
-        </div>
-    );
-}
+            <div className="detail-item">
+              <span>💨 {current.wind.speed} м/с</span>
+            </div>
+            <div className="detail-item">
+              <span>🏭 AQI: {air?.list[0].main.aqi}</span>
+            </div>
+          </div>
+        </div >
+      )}
+
+      <div className="forecast-row">
+        {weather?.list.slice(1, 6).map((item, index) => (
+          <div key={index} className="forecast-item">
+            <p>{item.dt_txt.split(' ')[1].substring(0, 5)}</p>
+
+            <WeatherIcon iconId={item.weather[0].icon} />
+
+            <p style={{ fontWeight: 'bold' }}>{Math.round(item.main.temp)}°</p>
+          </div>
+        ))}
+      </div>
+    </div >
+  );
+};
 
 export default App;
