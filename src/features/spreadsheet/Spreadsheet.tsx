@@ -1,38 +1,266 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { ROWS_COUNT, COLS_COUNT, DEFAULT_ROW_HEIGHT, DEFAULT_COL_WIDTH, ROW_HEADER_WIDTH } from './constants';
+import { ROWS_COUNT, COLS_COUNT, DEFAULT_ROW_HEIGHT, DEFAULT_COL_WIDTH, ROW_HEADER_WIDTH, HEADER_HEIGHT } from './constants';
 import { evaluateFormula } from './formulaParser';
+import type { SpreadsheetData, SpreadsheetDoc, CellData, CellValue } from '../../types/spreadsheet';
 import './Spreadsheet.css';
+import './NavPanel.css';
 
-const Spreadsheet: React.FC = () => {
-    const [data, setData] = useState<Record<string, string>>({});
-    const [rowsCount, setRowsCount] = useState(ROWS_COUNT);
-    const [colsCount, setColsCount] = useState(COLS_COUNT);
+interface SpreadsheetProps {
+    initialDoc: SpreadsheetDoc;
+    onAutoSave: (data: SpreadsheetData) => void;
+}
 
-    const [anchorCell, setAnchorCell] = useState<{ col: string, row: number } | null>(null);
-    const [focusCell, setFocusCell] = useState<{ col: string, row: number } | null>(null);
-
-    const [isEditing, setIsEditing] = useState(false);
-    const [editValue, setEditValue] = useState('');
-    const [scrollTop, setScrollTop] = useState(0);
+const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => {
+    const [data, setData] = useState<SpreadsheetData>(initialDoc.data || {});
+    const [rowsCount, setRowsCount] = useState(initialDoc.rows || ROWS_COUNT);
+    const [colsCount, setColsCount] = useState(initialDoc.cols || COLS_COUNT);
     const [colWidths, setColWidths] = useState<Record<string, number>>({});
     const [rowHeights, setRowHeights] = useState<Record<number, number>>({});
 
-    const [contextMenu, setContextMenu] = useState<{ x: number, y: number, type: 'row' | 'col', index: number | string } | null>(null);
+    const [anchorCell, setAnchorCell] = useState<{ col: string, row: number } | null>(null);
+    const [focusCell, setFocusCell] = useState<{ col: string, row: number } | null>(null);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editValue, setEditValue] = useState('');
+    const [scrollTop, setScrollTop] = useState(0);
+    const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
+    const [contextMenu, setContextMenu] = useState<{ x: number, y: number, type: 'col' | 'row', index: number | string } | null>(null);
 
+    const isDirty = useRef(false);
     const inputRef = useRef<HTMLInputElement>(null);
-    const HEADER_HEIGHT = 30;
 
-    const dynamicColLabels = useMemo(() => {
-        return Array.from({ length: colsCount }, (_, i) => {
-            let label = '';
-            let n = i;
-            while (n >= 0) {
-                label = String.fromCharCode((n % 26) + 65) + label;
-                n = Math.floor(n / 26) - 1;
-            }
-            return label;
+    const getColLabel = (index: number): string => {
+        let label = '';
+        let n = index;
+        while (n >= 0) {
+            label = String.fromCharCode((n % 26) + 65) + label;
+            n = Math.floor(n / 26) - 1;
+        }
+        return label;
+    };
+
+    const getColIdx = (col: string): number => {
+        let idx = 0;
+        for (let i = 0; i < col.length; i++) {
+            idx = idx * 26 + (col.charCodeAt(i) - 64);
+        }
+        return idx - 1;
+    };
+
+    const getPlainDataForParser = (currentData: SpreadsheetData): Record<string, string> => {
+        const plain: Record<string, string> = {};
+        Object.entries(currentData).forEach(([key, cell]) => {
+            plain[key] = String(cell?.value ?? '');
         });
-    }, [colsCount]);
+        return plain;
+    };
+
+    useEffect(() => {
+        if (!isDirty.current) return;
+        setSaveStatus('saving');
+        const timer = setTimeout(async () => {
+            try {
+                onAutoSave(data);
+                setSaveStatus('saved');
+                isDirty.current = false;
+            } catch (err) {
+                setSaveStatus('error');
+                console.error('Ошибка сохранения:', err);
+            }
+        }, 500);
+        return () => clearTimeout(timer);
+    }, [data, onAutoSave]);
+
+    useEffect(() => {
+        if (isEditing && inputRef.current) {
+            inputRef.current.focus();
+        }
+    }, [isEditing]);
+
+    useEffect(() => {
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            if (isDirty.current) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        };
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+    }, []);
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+                e.preventDefault();
+                onAutoSave(data);
+            }
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [data]);
+
+    const saveEdit = (col: string, row: number) => {
+        const id = `${col}${row}`;
+        const plainData = getPlainDataForParser(data);
+
+        const calculatedValue: CellValue = editValue.startsWith('=')
+            ? evaluateFormula(editValue, plainData)
+            : editValue;
+
+        const newCell: CellData = {
+            rawContent: editValue,
+            value: calculatedValue,
+            style: data[id]?.style
+        };
+
+        setData(prev => ({ ...prev, [id]: newCell }));
+        isDirty.current = true;
+        setIsEditing(false);
+    };
+
+    const exportToCSV = () => {
+        const labels = Array.from({ length: colsCount }, (_, i) => getColLabel(i));
+        const rows = ["sep=;"];
+
+        for (let r = 1; r <= rowsCount; r++) {
+            const rowData = labels.map(c => {
+                const val = data[`${c}${r}`]?.value ?? '';
+                return `"${String(val).replace(/"/g, '""')}"`;
+            });
+            rows.push(rowData.join(';'));
+        }
+
+        const blob = new Blob(["\ufeff" + rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = `${initialDoc.title}.csv`;
+        link.click();
+    };
+
+    const exportToJSON = () => {
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = `${initialDoc.title}.json`;
+        link.click();
+    };
+
+    const handleAddCol = (colLabel: string) => {
+        const targetIdx = getColIdx(colLabel);
+        const newData: SpreadsheetData = {};
+
+        Object.entries(data).forEach(([key, val]) => {
+            const m = key.match(/^([A-Z]+)(\d+)$/);
+            if (m) {
+                const c = m[1];
+                const r = m[2];
+                const currentIdx = getColIdx(c);
+
+                if (currentIdx > targetIdx) {
+                    const newColLabel = getColLabel(currentIdx + 1);
+                    newData[`${newColLabel}${r}`] = val;
+                } else {
+                    newData[key] = val;
+                }
+            }
+        });
+
+        setData(newData);
+        setColsCount(prev => prev + 1);
+        isDirty.current = true;
+    };
+
+    const handleDeleteCol = (colLabel: string) => {
+        const targetIdx = getColIdx(colLabel);
+        const newData: SpreadsheetData = {};
+
+        Object.entries(data).forEach(([key, val]) => {
+            const m = key.match(/^([A-Z]+)(\d+)$/);
+            if (m) {
+                const c = m[1];
+                const r = m[2];
+                const currentIdx = getColIdx(c);
+
+                if (currentIdx === targetIdx) return;
+
+                if (currentIdx > targetIdx) {
+                    const newColLabel = getColLabel(currentIdx - 1);
+                    newData[`${newColLabel}${r}`] = val;
+                } else {
+                    newData[key] = val;
+                }
+            }
+        });
+
+        setData(newData);
+        setColsCount(prev => Math.max(1, prev - 1));
+        isDirty.current = true;
+    };
+
+    const handleAddRow = (index: number) => {
+        const target = index + 1;
+        const newData: SpreadsheetData = {};
+
+        Object.entries(data).forEach(([key, val]) => {
+            const m = key.match(/^([A-Z]+)(\d+)$/);
+            if (m) {
+                const c = m[1];
+                const r = parseInt(m[2]);
+                if (r > target) {
+                    newData[`${c}${r + 1}`] = val;
+                } else {
+                    newData[key] = val;
+                }
+            }
+        });
+
+        setData(newData);
+        setRowsCount(prev => prev + 1);
+        isDirty.current = true;
+    };
+
+    const handleDeleteRow = (index: number) => {
+        const target = index + 1;
+        const newData: SpreadsheetData = {};
+
+        Object.entries(data).forEach(([key, val]) => {
+            const m = key.match(/^([A-Z]+)(\d+)$/);
+            if (m) {
+                const c = m[1];
+                const r = parseInt(m[2]);
+
+                if (r === target) return;
+
+                if (r > target) {
+                    newData[`${c}${r - 1}`] = val;
+                } else {
+                    newData[key] = val;
+                }
+            }
+        });
+
+        setData(newData);
+        setRowsCount(prev => Math.max(1, prev - 1));
+        isDirty.current = true;
+    };
+
+    const startResizing = (e: React.MouseEvent, type: 'col' | 'row', id: string | number, startSize: number) => {
+        e.preventDefault();
+        const startPos = type === 'col' ? e.pageX : e.pageY;
+        const move = (me: MouseEvent) => {
+            const currentPos = type === 'col' ? me.pageX : me.pageY;
+            const newSize = Math.max(30, startSize + (currentPos - startPos));
+            if (type === 'col') setColWidths(p => ({ ...p, [id]: newSize }));
+            else setRowHeights(p => ({ ...p, [id as number]: newSize }));
+        };
+        const up = () => {
+            document.removeEventListener('mousemove', move);
+            document.removeEventListener('mouseup', up);
+        };
+        document.addEventListener('mousemove', move);
+        document.addEventListener('mouseup', up);
+    };
+
+    const dynamicColLabels = useMemo(() => Array.from({ length: colsCount }, (_, i) => getColLabel(i)), [colsCount]);
 
     const colOffsets = useMemo(() => {
         const offsets: Record<string, number> = {};
@@ -52,160 +280,19 @@ const Spreadsheet: React.FC = () => {
         return offsets;
     }, [rowHeights, rowsCount]);
 
-    const totalHeight = rowOffsets[rowsCount] + HEADER_HEIGHT;
-    const getColIdx = (label: string) => {
-        let idx = 0;
-        for (let i = 0; i < label.length; i++) {
-            idx = idx * 26 + (label.charCodeAt(i) - 64);
-        }
-        return idx - 1;
-    };
-
-    const handleAddRow = (index: number) => {
-        const rowToInsertAfter = index + 1;
-        const newData: Record<string, string> = {};
-
-        Object.entries(data).forEach(([key, value]) => {
-            const match = key.match(/^([A-Z]+)(\d+)$/);
-            if (match) {
-                const col = match[1];
-                const row = parseInt(match[2]);
-
-                if (row > rowToInsertAfter) {
-                    newData[`${col}${row + 1}`] = value;
-                } else {
-                    newData[key] = value;
-                }
-            }
-        });
-
-        setData(newData);
-        setRowsCount(prev => prev + 1);
-        setContextMenu(null);
-    };
-
-    const handleDeleteRow = (index: number) => {
-        const rowToDelete = index + 1;
-        const newData: Record<string, string> = {};
-
-        Object.entries(data).forEach(([key, value]) => {
-            const match = key.match(/^([A-Z]+)(\d+)$/);
-            if (match) {
-                const col = match[1];
-                const row = parseInt(match[2]);
-
-                if (row === rowToDelete) return;
-
-                if (row > rowToDelete) {
-                    newData[`${col}${row - 1}`] = value;
-                } else {
-                    newData[key] = value;
-                }
-            }
-        });
-
-        setData(newData);
-        setRowsCount(prev => prev - 1);
-        setContextMenu(null);
-    };
-
-    const handleAddCol = (colLabel: string) => {
-        const targetIdx = getColIdx(colLabel);
-        const newData: Record<string, string> = {};
-
-        Object.entries(data).forEach(([key, value]) => {
-            const match = key.match(/^([A-Z]+)(\d+)$/);
-            if (match) {
-                const col = match[1];
-                const row = match[2];
-                const currentIdx = getColIdx(col);
-
-                if (currentIdx > targetIdx) {
-                    const nextLabel = dynamicColLabels[currentIdx + 1];
-                    newData[`${nextLabel}${row}`] = value;
-                } else {
-                    newData[key] = value;
-                }
-            }
-        });
-
-        setData(newData);
-        setColsCount(prev => prev + 1);
-        setContextMenu(null);
-    };
-
-    const handleDeleteCol = (colLabel: string) => {
-        const targetIdx = getColIdx(colLabel);
-        const newData: Record<string, string> = {};
-
-        Object.entries(data).forEach(([key, value]) => {
-            const match = key.match(/^([A-Z]+)(\d+)$/);
-            if (match) {
-                const col = match[1];
-                const row = match[2];
-                const currentIdx = getColIdx(col);
-
-                if (currentIdx === targetIdx) return;
-
-                if (currentIdx > targetIdx) {
-                    const prevLabel = dynamicColLabels[currentIdx - 1];
-                    newData[`${prevLabel}${row}`] = value;
-                } else {
-                    newData[key] = value;
-                }
-            }
-        });
-
-        setData(newData);
-        setColsCount(prev => prev - 1);
-        setContextMenu(null);
-    };
-
-    const onContextMenu = (e: React.MouseEvent, type: 'row' | 'col', index: number | string) => {
-        e.preventDefault();
-        setContextMenu({ x: e.pageX, y: e.pageY, type, index });
-    };
-
-    useEffect(() => {
-        const hideMenu = () => setContextMenu(null);
-        window.addEventListener('click', hideMenu);
-        return () => window.removeEventListener('click', hideMenu);
-    }, []);
-
-    const startResizing = (e: React.MouseEvent, type: 'col' | 'row', id: string | number, startSize: number) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const startPos = type === 'col' ? e.pageX : e.pageY;
-        const onMouseMove = (moveEvent: MouseEvent) => {
-            const currentPos = type === 'col' ? moveEvent.pageX : moveEvent.pageY;
-            const newSize = Math.max(25, startSize + (currentPos - startPos));
-            if (type === 'col') setColWidths(prev => ({ ...prev, [id]: newSize }));
-            else setRowHeights(prev => ({ ...prev, [id as number]: newSize }));
-        };
-        const onMouseUp = () => {
-            document.removeEventListener('mousemove', onMouseMove);
-            document.removeEventListener('mouseup', onMouseUp);
-        };
-        document.addEventListener('mousemove', onMouseMove);
-        document.addEventListener('mouseup', onMouseUp);
-    };
-
     const checkSelection = useMemo(() => {
         if (!anchorCell || !focusCell) return { isIn: () => false, minC: 'A', maxC: 'A', minR: 1, maxR: 1 };
-        const aIdx = getColIdx(anchorCell.col);
-        const fIdx = getColIdx(focusCell.col);
-        const minCIdx = Math.min(aIdx, fIdx);
-        const maxCIdx = Math.max(aIdx, fIdx);
-        const minR = Math.min(anchorCell.row, focusCell.row);
-        const maxR = Math.max(anchorCell.row, focusCell.row);
+        const aIdx = getColIdx(anchorCell.col), fIdx = getColIdx(focusCell.col);
+        const minCIdx = Math.min(aIdx, fIdx), maxCIdx = Math.max(aIdx, fIdx);
+        const minR = Math.min(anchorCell.row, focusCell.row), maxR = Math.max(anchorCell.row, focusCell.row);
         return {
             isIn: (col: string, row: number) => {
                 const c = getColIdx(col);
                 return c >= minCIdx && c <= maxCIdx && row >= minR && row <= maxR;
             },
-            minC: dynamicColLabels[minCIdx], maxC: dynamicColLabels[maxCIdx], minR, maxR
+            minC: getColLabel(minCIdx), maxC: getColLabel(maxCIdx), minR, maxR
         };
-    }, [anchorCell, focusCell, dynamicColLabels]);
+    }, [anchorCell, focusCell]);
 
     const selectionRect = useMemo(() => {
         if (!anchorCell || !focusCell) return null;
@@ -217,35 +304,8 @@ const Spreadsheet: React.FC = () => {
         return { x, y, width, height };
     }, [checkSelection, colOffsets, rowOffsets, colWidths]);
 
-    const startIndex = useMemo(() => {
-        const idx = rowOffsets.findIndex(o => o > scrollTop - 100);
-        return idx === -1 ? 0 : Math.max(0, idx - 1);
-    }, [rowOffsets, scrollTop]);
-
-    const endIndex = useMemo(() => {
-        const idx = rowOffsets.findIndex(o => o > scrollTop + 1000);
-        return idx === -1 ? rowsCount : Math.min(rowsCount, idx + 2);
-    }, [rowOffsets, scrollTop, rowsCount]);
-
-    useEffect(() => {
-        if (isEditing && inputRef.current) inputRef.current.focus();
-    }, [isEditing]);
-
-    const handleCellMouseDown = (col: string, row: number, e: React.MouseEvent) => {
-        if (e.shiftKey && anchorCell) {
-            setFocusCell({ col, row });
-        } else {
-            setAnchorCell({ col, row });
-            setFocusCell({ col, row });
-            setIsEditing(false);
-            setEditValue('');
-        }
-    };
-
-    const saveEdit = (id: string) => {
-        setData(p => ({ ...p, [id]: editValue }));
-        setIsEditing(false);
-    };
+    const startIndex = Math.max(0, Math.floor(scrollTop / DEFAULT_ROW_HEIGHT) - 5);
+    const endIndex = Math.min(rowsCount, startIndex + 40);
 
     const renderRows = useMemo(() => {
         const rows = [];
@@ -256,35 +316,56 @@ const Spreadsheet: React.FC = () => {
 
             rows.push(
                 <div key={i} className="spreadsheet-row" style={{ top: rowTop, height: h }}>
-                    <div
-                        className="row-header"
-                        style={{ width: ROW_HEADER_WIDTH, height: h }}
-                        onContextMenu={(e) => onContextMenu(e, 'row', i)}
-                    >
+                    <div className="row-header" style={{ width: ROW_HEADER_WIDTH, height: h }}
+                        onContextMenu={(e) => {
+                            e.preventDefault();
+                            setContextMenu({ x: e.pageX, y: e.pageY, type: 'row', index: i });
+                        }}>
                         {rowNum}
                         <div className="resizer-h-header" onMouseDown={(e) => startResizing(e, 'row', i, h)} />
                     </div>
                     {dynamicColLabels.map(col => {
                         const id = `${col}${rowNum}`;
                         const isAnchor = anchorCell?.col === col && anchorCell?.row === rowNum;
-                        const w = colWidths[col] || DEFAULT_COL_WIDTH;
-                        const val = data[id] || '';
-                        const display = val.startsWith('=') ? evaluateFormula(val, data) : val;
+                        const cell = data[id];
+                        const inSelection = checkSelection.isIn(col, rowNum);
+
                         return (
                             <div
                                 key={id}
-                                className={`cell ${checkSelection.isIn(col, rowNum) ? 'cell-in-selection' : ''}`}
-                                style={{ width: w, height: h }}
-                                onMouseDown={(e) => handleCellMouseDown(col, rowNum, e)}
-                                onDoubleClick={() => { setEditValue(val); setIsEditing(true); }}
+                                className={`cell ${inSelection ? 'cell-in-selection' : ''} ${isAnchor ? 'anchor' : ''}`}
+                                style={{
+                                    width: colWidths[col] || DEFAULT_COL_WIDTH,
+                                    height: h,
+                                    fontWeight: cell?.style?.bold ? 'bold' : 'normal',
+                                    fontStyle: cell?.style?.italic ? 'italic' : 'normal'
+                                }}
+                                onMouseDown={(e) => {
+                                    if (e.shiftKey && anchorCell) {
+                                        setFocusCell({ col, row: rowNum });
+                                    } else {
+                                        setAnchorCell({ col, row: rowNum });
+                                        setFocusCell({ col, row: rowNum });
+                                        setIsEditing(false);
+                                    }
+                                }}
+                                onDoubleClick={() => {
+                                    setEditValue(cell?.rawContent || '');
+                                    setIsEditing(true);
+                                }}
                             >
                                 {isEditing && isAnchor ? (
                                     <input
-                                        ref={inputRef} className="cell-input"
-                                        value={editValue} onChange={e => setEditValue(e.target.value)}
-                                        onBlur={() => saveEdit(id)} onKeyDown={ev => ev.key === 'Enter' && saveEdit(id)}
+                                        ref={inputRef}
+                                        className="cell-input"
+                                        value={editValue}
+                                        onChange={e => setEditValue(e.target.value)}
+                                        onBlur={() => saveEdit(col, rowNum)}
+                                        onKeyDown={ev => ev.key === 'Enter' && saveEdit(col, rowNum)}
                                     />
-                                ) : <div className="cell-content">{display}</div>}
+                                ) : (
+                                    <div className="cell-content">{cell ? String(cell.value) : ''}</div>
+                                )}
                             </div>
                         );
                     })}
@@ -295,51 +376,56 @@ const Spreadsheet: React.FC = () => {
     }, [startIndex, endIndex, data, anchorCell, isEditing, editValue, colWidths, rowHeights, rowOffsets, checkSelection, dynamicColLabels]);
 
     return (
-        <div
-            className="spreadsheet-wrapper"
-            tabIndex={0}
-            onKeyDown={e => {
-                if (!isEditing && e.key === 'Enter' && anchorCell) {
-                    const currentId = `${anchorCell.col}${anchorCell.row}`;
-                    setEditValue(data[currentId] || '');
-                    setIsEditing(true);
-                }
-            }}
-        >
+        <div className="spreadsheet-wrapper" tabIndex={0} onKeyDown={e => {
+            if (!isEditing && e.key === 'Enter' && anchorCell) {
+                setEditValue(data[`${anchorCell.col}${anchorCell.row}`]?.rawContent || '');
+                setIsEditing(true);
+            }
+        }}>
+            <div className="top-nav-panel">
+                <div className="doc-info-block">
+                    <span className="doc-main-title">{initialDoc.title}</span>
+                    <span className={`save-status ${saveStatus}`}>
+                        {saveStatus === 'saving' ? '● Сохранение...' : '✓ Сохранено'}
+                    </span>
+                </div>
+                <div className="nav-actions">
+                    <button className="nav-btn" onClick={exportToCSV}>Экспорт CSV</button>
+                    <button className="nav-btn" onClick={exportToJSON}>JSON</button>
+                </div>
+            </div>
+
             <div className="formula-bar">
                 <div className="address-box">{anchorCell ? `${anchorCell.col}${anchorCell.row}` : ''}</div>
                 <input
                     className="formula-input"
-                    value={isEditing ? editValue : (anchorCell ? data[`${anchorCell.col}${anchorCell.row}`] || '' : '')}
+                    value={isEditing ? editValue : (anchorCell ? data[`${anchorCell.col}${anchorCell.row}`]?.rawContent || '' : '')}
                     onChange={e => { setEditValue(e.target.value); setIsEditing(true); }}
                 />
             </div>
+
             <div className="spreadsheet-container" onScroll={e => setScrollTop(e.currentTarget.scrollTop)}>
-                <div style={{ height: totalHeight, position: 'relative', width: 'fit-content' }}>
+                <div style={{ height: rowOffsets[rowsCount] + HEADER_HEIGHT + 100, position: 'relative', width: 'fit-content' }}>
                     <div className="spreadsheet-header-row" style={{ height: HEADER_HEIGHT }}>
                         <div className="row-header-spacer" style={{ width: ROW_HEADER_WIDTH }} />
                         {dynamicColLabels.map(l => (
-                            <div
-                                key={l}
-                                className="col-header"
-                                style={{ width: colWidths[l] || DEFAULT_COL_WIDTH }}
-                                onContextMenu={(e) => onContextMenu(e, 'col', l)}
-                            >
+                            <div key={l} className="col-header" style={{ width: colWidths[l] || DEFAULT_COL_WIDTH }}
+                                onContextMenu={(e) => {
+                                    e.preventDefault();
+                                    setContextMenu({ x: e.pageX, y: e.pageY, type: 'col', index: l });
+                                }}>
                                 {l}
                                 <div className="resizer-v" onMouseDown={(e) => startResizing(e, 'col', l, colWidths[l] || DEFAULT_COL_WIDTH)} />
                             </div>
                         ))}
                     </div>
                     {anchorCell && selectionRect && (
-                        <div
-                            className="selection-border"
-                            style={{
-                                left: selectionRect.x - 1,
-                                top: selectionRect.y - 1,
-                                width: selectionRect.width + 1,
-                                height: selectionRect.height + 1
-                            }}
-                        >
+                        <div className="selection-border" style={{
+                            left: selectionRect.x - 1,
+                            top: selectionRect.y - 1,
+                            width: selectionRect.width + 1,
+                            height: selectionRect.height + 1
+                        }}>
                             <div className="selection-fill-handle" />
                         </div>
                     )}
@@ -348,16 +434,32 @@ const Spreadsheet: React.FC = () => {
             </div>
 
             {contextMenu && (
-                <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }}>
+                <div className="context-menu" style={{
+                    top: contextMenu.y,
+                    left: contextMenu.x,
+                    position: 'fixed',
+                    zIndex: 500,
+                    background: 'white',
+                    border: '1px solid #ccc',
+                    boxShadow: '2px 2px 5px rgba(0,0,0,0.1)'
+                }} onClick={() => setContextMenu(null)}>
                     {contextMenu.type === 'row' ? (
                         <>
-                            <div className="menu-item" onClick={() => handleAddRow(contextMenu.index as number)}>Добавить строку ниже</div>
-                            <div className="menu-item" onClick={() => handleDeleteRow(contextMenu.index as number)}>Удалить строку</div>
+                            <div className="menu-item" onClick={() => handleAddRow(contextMenu.index as number)}>
+                                Добавить строку ниже
+                            </div>
+                            <div className="menu-item" style={{ color: 'red' }} onClick={() => handleDeleteRow(contextMenu.index as number)}>
+                                Удалить строку
+                            </div>
                         </>
                     ) : (
                         <>
-                            <div className="menu-item" onClick={() => handleAddCol(contextMenu.index as string)}>Добавить столбец справа</div>
-                            <div className="menu-item" onClick={() => handleDeleteCol(contextMenu.index as string)}>Удалить столбец</div>
+                            <div className="menu-item" onClick={() => handleAddCol(contextMenu.index as string)}>
+                                Добавить столбец справа
+                            </div>
+                            <div className="menu-item" style={{ color: 'red' }} onClick={() => handleDeleteCol(contextMenu.index as string)}>
+                                Удалить столбец
+                            </div>
                         </>
                     )}
                 </div>
