@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { ROWS_COUNT, COLS_COUNT, DEFAULT_ROW_HEIGHT, DEFAULT_COL_WIDTH, ROW_HEADER_WIDTH, HEADER_HEIGHT } from './constants';
 import { evaluateFormula } from './formulaParser';
 import type { SpreadsheetData, SpreadsheetDoc, CellData, CellValue } from '../../types/spreadsheet';
+import { useAppDispatch, useAppSelector } from '../../store/hooks';
+import { updateCell, setData, undo, redo, setInitialData } from '../../store/slices/spreadsheetSlice';
 import './Spreadsheet.css';
 import './NavPanel.css';
 
@@ -11,7 +13,8 @@ interface SpreadsheetProps {
 }
 
 const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => {
-    const [data, setData] = useState<SpreadsheetData>(initialDoc.data || {});
+    const dispatch = useAppDispatch();
+    const data = useAppSelector((state) => state.spreadsheet.data);
     const [rowsCount, setRowsCount] = useState(initialDoc.rows || ROWS_COUNT);
     const [colsCount, setColsCount] = useState(initialDoc.cols || COLS_COUNT);
     const [colWidths, setColWidths] = useState<Record<string, number>>({});
@@ -55,6 +58,12 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => 
     };
 
     useEffect(() => {
+        if (initialDoc.data) {
+            dispatch(setInitialData(initialDoc.data));
+        }
+    }, [initialDoc.id, dispatch]);
+
+    useEffect(() => {
         if (!isDirty.current) return;
         setSaveStatus('saving');
         const timer = setTimeout(async () => {
@@ -75,6 +84,29 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => 
             inputRef.current.focus();
         }
     }, [isEditing]);
+
+    useEffect(() => {
+        const handleUndoRedo = (e: KeyboardEvent) => {
+            if (isEditing) return;
+
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+                e.preventDefault();
+                if (e.shiftKey) {
+                    dispatch(redo());
+                } else {
+                    dispatch(undo());
+                }
+            }
+
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+                e.preventDefault();
+                dispatch(redo());
+            }
+        };
+
+        window.addEventListener('keydown', handleUndoRedo);
+        return () => window.removeEventListener('keydown', handleUndoRedo);
+    }, [dispatch, isEditing]);
 
     useEffect(() => {
         const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -112,7 +144,8 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => 
             style: data[id]?.style
         };
 
-        setData(prev => ({ ...prev, [id]: newCell }));
+        dispatch(updateCell({ id, value: newCell }));
+
         isDirty.current = true;
         setIsEditing(false);
     };
@@ -164,7 +197,7 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => 
             }
         });
 
-        setData(newData);
+        dispatch(setData(newData));
         setColsCount(prev => prev + 1);
         isDirty.current = true;
     };
@@ -191,7 +224,7 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => 
             }
         });
 
-        setData(newData);
+        dispatch(setData(newData));
         setColsCount(prev => Math.max(1, prev - 1));
         isDirty.current = true;
     };
@@ -213,7 +246,7 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => 
             }
         });
 
-        setData(newData);
+        dispatch(setData(newData));
         setRowsCount(prev => prev + 1);
         isDirty.current = true;
     };
@@ -238,7 +271,7 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => 
             }
         });
 
-        setData(newData);
+        dispatch(setData(newData));
         setRowsCount(prev => Math.max(1, prev - 1));
         isDirty.current = true;
     };
