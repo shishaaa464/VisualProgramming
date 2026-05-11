@@ -2,6 +2,7 @@ import { configureStore } from '@reduxjs/toolkit';
 import spreadsheetReducer from './slices/spreadsheetSlice';
 import uiReducer from './slices/uiSlice';
 import documentsReducer from './slices/documentsSlice';
+import authReducer from './slices/authSlice';
 import { saveMiddleware } from './middleware/saveMiddleware';
 
 export const store = configureStore({
@@ -9,6 +10,7 @@ export const store = configureStore({
         spreadsheet: spreadsheetReducer,
         ui: uiReducer,
         documents: documentsReducer,
+        auth: authReducer,
     },
     middleware: (getDefaultMiddleware) =>
         getDefaultMiddleware().concat(saveMiddleware),

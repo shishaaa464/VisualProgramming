@@ -1,0 +1,11 @@
+.spreadsheet-page-loading {
+    text-align: center;
+    padding: 40px;
+    color: #666;
+}
+
+.spreadsheet-page-not-found {
+    text-align: center;
+    padding: 40px;
+    color: #666;
+}

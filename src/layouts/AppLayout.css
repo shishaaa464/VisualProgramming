@@ -1,0 +1,43 @@
+.app-layout-container {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+.app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 20px;
+    background: white;
+    border-bottom: 1px solid #ccc;
+}
+
+.app-header-left {
+    display: flex;
+    align-items: center;
+}
+
+.app-logo {
+    margin: 0;
+    cursor: pointer;
+    color: #1a73e8;
+    font-size: 20px;
+}
+
+.app-header-right {
+    display: flex;
+    gap: 10px;
+}
+
+.app-header-btn {
+    padding: 6px 12px;
+    border: 1px solid #ccc;
+    background: white;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.app-main-content {
+    flex: 1;
+}
