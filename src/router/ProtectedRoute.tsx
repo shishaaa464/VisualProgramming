@@ -1,9 +1,14 @@
 import { Navigate, Outlet } from 'react-router-dom';
+import { useAppSelector } from '../store/hooks';
 
 const ProtectedRoute = () => {
-    const isLoggedIn = true;
+    const { isAuthenticated, isLoading } = useAppSelector((state) => state.auth);
 
-    if (!isLoggedIn) {
+    if (isLoading) {
+        return <div style={{ padding: '40px', textAlign: 'center' }}>Загрузка...</div>;
+    }
+
+    if (!isAuthenticated) {
         return <Navigate to="/login" replace />;
     }
 

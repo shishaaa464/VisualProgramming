@@ -4,9 +4,19 @@ import ProtectedRoute from './ProtectedRoute';
 import DashboardPage from '../pages/DashboardPage';
 import SpreadsheetPage from '../pages/SpreadsheetPage';
 import ProfilePage from '../pages/ProfilePage';
+import LoginPage from '../pages/LoginPage';
+import RegisterPage from '../pages/RegisterPage';
 import NotFoundPage from '../pages/NotFoundPage';
 
 export const router = createBrowserRouter([
+    {
+        path: '/login',
+        element: <LoginPage />,
+    },
+    {
+        path: '/register',
+        element: <RegisterPage />,
+    },
     {
         path: '/',
         element: <Navigate to="/dashboard" replace />,

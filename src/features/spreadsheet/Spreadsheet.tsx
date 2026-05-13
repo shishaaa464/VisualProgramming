@@ -4,6 +4,7 @@ import { evaluateFormula } from './formulaParser';
 import type { SpreadsheetData, SpreadsheetDoc, CellData, CellValue } from '../../types/spreadsheet';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
 import { updateCell, setData, undo, redo, setInitialData } from '../../store/slices/spreadsheetSlice';
+import { updateDocumentThunk } from '../../store/slices/documentsSlice';
 import './Spreadsheet.css';
 import './NavPanel.css';
 
@@ -15,6 +16,7 @@ interface SpreadsheetProps {
 const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => {
     const dispatch = useAppDispatch();
     const data = useAppSelector((state) => state.spreadsheet.data);
+    const activeDocId = useAppSelector((state) => state.documents.activeDocId);
     const [rowsCount, setRowsCount] = useState(initialDoc.rows || ROWS_COUNT);
     const [colsCount, setColsCount] = useState(initialDoc.cols || COLS_COUNT);
     const [colWidths, setColWidths] = useState<Record<string, number>>({});
@@ -64,20 +66,28 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => 
     }, [initialDoc.id, dispatch]);
 
     useEffect(() => {
-        if (!isDirty.current) return;
-        setSaveStatus('saving');
-        const timer = setTimeout(async () => {
+        if (!activeDocId) return;
+
+        const saveData = async () => {
+            setSaveStatus('saving');
             try {
-                onAutoSave(data);
+                await dispatch(updateDocumentThunk({
+                    id: activeDocId,
+                    data: data
+                })).unwrap();
                 setSaveStatus('saved');
                 isDirty.current = false;
             } catch (err) {
                 setSaveStatus('error');
                 console.error('Ошибка сохранения:', err);
             }
-        }, 500);
-        return () => clearTimeout(timer);
-    }, [data, onAutoSave]);
+        };
+
+        if (isDirty.current) {
+            const timer = setTimeout(saveData, 500);
+            return () => clearTimeout(timer);
+        }
+    }, [data, activeDocId, dispatch]);
 
     useEffect(() => {
         if (isEditing && inputRef.current) {

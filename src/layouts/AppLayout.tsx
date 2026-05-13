@@ -6,6 +6,7 @@ import './AppLayout.css';
 const AppLayout = () => {
     const navigate = useNavigate();
     const user = useAppSelector((state) => state.auth.user);
+    const saveStatus = useAppSelector((state) => state.ui.saveStatus);
 
     const goToDashboard = () => {
         navigate('/dashboard');
@@ -13,6 +14,19 @@ const AppLayout = () => {
 
     const goToProfile = () => {
         navigate('/profile');
+    };
+
+    const handleLogout = () => {
+        console.log('Кнопка выхода нажата');
+        localStorage.removeItem('accessToken');
+        localStorage.removeItem('refreshToken');
+        window.location.href = '/login';
+    };
+
+    const getSaveStatusText = () => {
+        if (saveStatus === 'saving') return 'Сохранение...';
+        if (saveStatus === 'error') return 'Ошибка';
+        return '';
     };
 
     return (
@@ -23,6 +37,11 @@ const AppLayout = () => {
                         Таблицы
                     </h2>
                     <Breadcrumbs />
+                    {getSaveStatusText() && (
+                        <span className={`save-status-indicator ${saveStatus}`}>
+                            {getSaveStatusText()}
+                        </span>
+                    )}
                 </div>
 
                 <div className="app-header-right">
@@ -31,6 +50,13 @@ const AppLayout = () => {
                     </button>
                     <button className="app-header-btn" onClick={goToProfile}>
                         {user ? user.name : 'Профиль'}
+                    </button>
+                    <button
+                        className="app-header-btn logout-btn"
+                        onClick={handleLogout}
+                        style={{ background: '#d93025', color: 'white' }}
+                    >
+                        Выйти
                     </button>
                 </div>
             </div>

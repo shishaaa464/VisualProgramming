@@ -15,7 +15,10 @@ describe('spreadsheetSlice', () => {
     });
 
     it('должен обновлять ячейку и сохранять историю для Undo', () => {
-        const payload = { id: 'B2', value: { rawContent: '10', value: '10' } };
+        const payload = {
+            id: 'B2',
+            value: { rawContent: '10', value: '10' }
+        };
         const state = reducer(initialState, updateCell(payload));
 
         expect(state.data['B2']).toEqual(payload.value);
@@ -24,7 +27,11 @@ describe('spreadsheetSlice', () => {
     });
 
     it('должен корректно делать Undo и Redo', () => {
-        const step1 = reducer(initialState, updateCell({ id: 'A1', value: { value: '1' } }));
+        const step1 = reducer(initialState, updateCell({
+            id: 'A1',
+            value: { rawContent: '1', value: '1' }
+        }));
+
         const afterUndo = reducer(step1, undo());
         expect(afterUndo.data).toEqual({});
         expect(afterUndo.history.future).toHaveLength(1);

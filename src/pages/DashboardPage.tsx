@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../store/hooks';
-import { setDocuments } from '../store/slices/documentsSlice';
+import { fetchUserDocuments, createDocumentThunk, deleteDocumentThunk, renameDocumentThunk } from '../store/slices/documentsSlice';
 import Dashboard from '../features/spreadsheet/Dashboard';
 import type { SpreadsheetDoc, SpreadsheetData } from '../types/spreadsheet';
 import './DashboardPage.css';
@@ -10,20 +10,17 @@ const DashboardPage = () => {
     const dispatch = useAppDispatch();
     const navigate = useNavigate();
     const documents = useAppSelector((state) => state.documents.list);
+    const user = useAppSelector((state) => state.auth.user);
 
     useEffect(() => {
-        const saved = localStorage.getItem('spreadsheet_storage');
-        if (saved) {
-            dispatch(setDocuments(JSON.parse(saved)));
+        if (user) {
+            dispatch(fetchUserDocuments(user.id));
         }
-    }, [dispatch]);
+    }, [dispatch, user]);
 
-    const saveAll = (list: SpreadsheetDoc[]) => {
-        dispatch(setDocuments(list));
-        localStorage.setItem('spreadsheet_storage', JSON.stringify(list));
-    };
+    const handleCreate = async (title: string, rows: number, cols: number, initialData: SpreadsheetData = {}) => {
+        if (!user) return;
 
-    const handleCreate = (title: string, rows: number, cols: number, initialData: SpreadsheetData = {}) => {
         const newDoc: SpreadsheetDoc = {
             id: Date.now().toString(),
             title: title || 'Новая таблица',
@@ -32,42 +29,39 @@ const DashboardPage = () => {
             data: initialData,
             createdAt: Date.now(),
             updatedAt: Date.now(),
-            ownerId: 'current-user'
+            ownerId: user.id,
         };
 
-        const newList = [newDoc, ...documents];
-        saveAll(newList);
+        await dispatch(createDocumentThunk(newDoc));
         navigate(`/documents/${newDoc.id}`);
     };
 
-    const handleOpen = (doc: SpreadsheetDoc) => {
-        navigate(`/documents/${doc.id}`);
-    };
-
     const handleDelete = (id: string) => {
-        saveAll(documents.filter(d => d.id !== id));
+        if (window.confirm('Удалить документ?')) {
+            dispatch(deleteDocumentThunk(id));
+        }
     };
 
-    const handleDuplicate = (doc: SpreadsheetDoc) => {
+    const handleRename = (id: string, newTitle: string) => {
+        if (newTitle.trim()) {
+            dispatch(renameDocumentThunk({ id, title: newTitle }));
+        }
+    };
+
+    const handleDuplicate = async (doc: SpreadsheetDoc) => {
+        if (!user) return;
+
         const copy: SpreadsheetDoc = {
             ...doc,
             id: Date.now().toString(),
             title: doc.title + ' (копия)',
-            data: { ...doc.data },
+            data: JSON.parse(JSON.stringify(doc.data)),
             createdAt: Date.now(),
-            updatedAt: Date.now()
+            updatedAt: Date.now(),
+            ownerId: user.id,
         };
-        saveAll([copy, ...documents]);
-    };
 
-    const handleRename = (id: string, newTitle: string) => {
-        const updated = documents.map(d => {
-            if (d.id === id) {
-                return { ...d, title: newTitle, updatedAt: Date.now() };
-            }
-            return d;
-        });
-        saveAll(updated);
+        await dispatch(createDocumentThunk(copy));
     };
 
     return (
@@ -75,7 +69,7 @@ const DashboardPage = () => {
             <Dashboard
                 docs={documents}
                 onCreate={handleCreate}
-                onOpen={handleOpen}
+                onOpen={(doc) => navigate(`/documents/${doc.id}`)}
                 onDelete={handleDelete}
                 onDuplicate={handleDuplicate}
                 onRename={handleRename}

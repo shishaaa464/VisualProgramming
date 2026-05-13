@@ -1,6 +1,6 @@
 import { createSlice } from '@reduxjs/toolkit';
 import type { PayloadAction } from '@reduxjs/toolkit';
-import type { SpreadsheetData } from '../../types/spreadsheet';
+import type { SpreadsheetData, CellData } from '../../types/spreadsheet';
 
 interface SpreadsheetState {
     data: SpreadsheetData;
@@ -28,7 +28,7 @@ const spreadsheetSlice = createSlice({
             state.history.future = [];
         },
 
-        updateCell: (state, action: PayloadAction<{ id: string; value: any }>) => {
+        updateCell: (state, action: PayloadAction<{ id: string; value: CellData }>) => {
             state.history.past.push({ ...state.data });
 
             if (state.history.past.length > 20) state.history.past.shift();

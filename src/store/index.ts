@@ -3,7 +3,6 @@ import spreadsheetReducer from './slices/spreadsheetSlice';
 import uiReducer from './slices/uiSlice';
 import documentsReducer from './slices/documentsSlice';
 import authReducer from './slices/authSlice';
-import { saveMiddleware } from './middleware/saveMiddleware';
 
 export const store = configureStore({
     reducer: {
@@ -12,8 +11,6 @@ export const store = configureStore({
         documents: documentsReducer,
         auth: authReducer,
     },
-    middleware: (getDefaultMiddleware) =>
-        getDefaultMiddleware().concat(saveMiddleware),
 });
 
 export type RootState = ReturnType<typeof store.getState>;
