@@ -22,13 +22,13 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => 
     const [colWidths, setColWidths] = useState<Record<string, number>>({});
     const [rowHeights, setRowHeights] = useState<Record<number, number>>({});
 
-    const [anchorCell, setAnchorCell] = useState<{ col: string, row: number } | null>(null);
-    const [focusCell, setFocusCell] = useState<{ col: string, row: number } | null>(null);
+    const [anchorCell, setAnchorCell] = useState<{ col: string; row: number } | null>(null);
+    const [focusCell, setFocusCell] = useState<{ col: string; row: number } | null>(null);
     const [isEditing, setIsEditing] = useState(false);
     const [editValue, setEditValue] = useState('');
     const [scrollTop, setScrollTop] = useState(0);
     const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
-    const [contextMenu, setContextMenu] = useState<{ x: number, y: number, type: 'col' | 'row', index: number | string } | null>(null);
+    const [contextMenu, setContextMenu] = useState<{ x: number; y: number; type: 'col' | 'row'; index: number | string } | null>(null);
 
     const isDirty = useRef(false);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -138,7 +138,7 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => 
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [data]);
+    }, [data, onAutoSave]);
 
     const saveEdit = (col: string, row: number) => {
         const id = `${col}${row}`;
