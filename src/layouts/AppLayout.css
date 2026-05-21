@@ -1,0 +1,82 @@
+.app-layout-container {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+.app-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 20px;
+    background: white;
+    border-bottom: 1px solid #dadce0;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.app-header-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.app-logo {
+    margin: 0;
+    cursor: pointer;
+    color: #1a73e8;
+    font-size: 20px;
+    font-weight: 600;
+}
+
+.app-logo:hover {
+    color: #1557b0;
+}
+
+.save-status-indicator {
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    background: #f1f3f4;
+}
+
+.save-status-indicator.saving {
+    color: #f2994a;
+}
+
+.save-status-indicator.error {
+    color: #d93025;
+}
+
+.app-header-right {
+    display: flex;
+    gap: 10px;
+}
+
+.app-header-btn {
+    padding: 6px 12px;
+    border: 1px solid #dadce0;
+    background: white;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.2s;
+}
+
+.app-header-btn:hover {
+    background: #f1f3f4;
+}
+
+.logout-btn {
+    color: #d93025;
+    border-color: #d93025;
+}
+
+.logout-btn:hover {
+    background: #fce8e6;
+}
+
+.app-main-content {
+    flex: 1;
+}
