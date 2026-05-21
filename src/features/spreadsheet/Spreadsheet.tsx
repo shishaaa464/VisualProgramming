@@ -3,17 +3,17 @@ import { ROWS_COUNT, COLS_COUNT, DEFAULT_ROW_HEIGHT, DEFAULT_COL_WIDTH, ROW_HEAD
 import { evaluateFormula } from './formulaParser';
 import type { SpreadsheetData, SpreadsheetDoc, CellData, CellValue } from '../../types/spreadsheet';
 import { useAppDispatch, useAppSelector } from '../../store/hooks';
-import { updateCell, setData, undo, redo, setInitialData } from '../../store/slices/spreadsheetSlice';
+import { updateCell, setData, undo, redo, setInitialData, applyStyleToSelection } from '../../store/slices/spreadsheetSlice';
 import { updateDocumentThunk } from '../../store/slices/documentsSlice';
+import FormattingToolbar from './FormattingToolbar';
 import './Spreadsheet.css';
 import './NavPanel.css';
 
 interface SpreadsheetProps {
     initialDoc: SpreadsheetDoc;
-    onAutoSave: (data: SpreadsheetData) => void;
 }
 
-const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => {
+const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc }) => {
     const dispatch = useAppDispatch();
     const data = useAppSelector((state) => state.spreadsheet.data);
     const activeDocId = useAppSelector((state) => state.documents.activeDocId);
@@ -32,6 +32,39 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => 
 
     const isDirty = useRef(false);
     const inputRef = useRef<HTMLInputElement>(null);
+    const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    const formatValueByType = (value: CellValue, format?: string): string => {
+        if (value === null || value === undefined || value === '') return '';
+
+        const stringValue = String(value);
+
+        if (!format || format === 'number') return stringValue;
+
+        if (format === 'date') {
+            const num = parseFloat(stringValue);
+            if (!isNaN(num) && num > 100000 && num < 10000000000) {
+                return new Date(num).toLocaleDateString('ru-RU');
+            }
+            const parsedDate = new Date(stringValue);
+            if (!isNaN(parsedDate.getTime())) {
+                return parsedDate.toLocaleDateString('ru-RU');
+            }
+            return stringValue;
+        }
+
+        const num = parseFloat(stringValue);
+        if (isNaN(num)) return stringValue;
+
+        switch (format) {
+            case 'percent':
+                return `${(num * 100).toFixed(2)}%`;
+            case 'currency':
+                return `${num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')} ₽`;
+            default:
+                return stringValue;
+        }
+    };
 
     const getColLabel = (index: number): string => {
         let label = '';
@@ -59,6 +92,171 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => 
         return plain;
     };
 
+    const getSelectionRange = () => {
+        if (!anchorCell) return null;
+        const focus = focusCell || anchorCell;
+        return {
+            startCol: anchorCell.col,
+            startRow: anchorCell.row,
+            endCol: focus.col,
+            endRow: focus.row
+        };
+    };
+
+    const copySelection = () => {
+        if (!anchorCell || !focusCell) return;
+
+        const startColIdx = getColIdx(anchorCell.col);
+        const endColIdx = getColIdx(focusCell.col);
+        const startRow = Math.min(anchorCell.row, focusCell.row);
+        const endRow = Math.max(anchorCell.row, focusCell.row);
+
+        const copied: Record<string, CellData> = {};
+
+        for (let colIdx = startColIdx; colIdx <= endColIdx; colIdx++) {
+            const col = getColLabel(colIdx);
+            for (let row = startRow; row <= endRow; row++) {
+                const cellId = `${col}${row}`;
+                if (data[cellId]) {
+                    copied[cellId] = { ...data[cellId] };
+                }
+            }
+        }
+
+        localStorage.setItem('spreadsheet_clipboard', JSON.stringify(copied));
+    };
+
+    const cutSelection = () => {
+        copySelection();
+        clearSelection();
+    };
+
+    const clearSelection = () => {
+        if (!anchorCell || !focusCell) return;
+
+        const startColIdx = getColIdx(anchorCell.col);
+        const endColIdx = getColIdx(focusCell.col);
+        const startRow = Math.min(anchorCell.row, focusCell.row);
+        const endRow = Math.max(anchorCell.row, focusCell.row);
+
+        for (let colIdx = startColIdx; colIdx <= endColIdx; colIdx++) {
+            const col = getColLabel(colIdx);
+            for (let row = startRow; row <= endRow; row++) {
+                const cellId = `${col}${row}`;
+                dispatch(updateCell({
+                    id: cellId,
+                    value: { rawContent: '', value: '', style: data[cellId]?.style }
+                }));
+            }
+        }
+        isDirty.current = true;
+    };
+
+    const pasteFromClipboard = () => {
+        if (!anchorCell) return;
+
+        const clipboardRaw = localStorage.getItem('spreadsheet_clipboard');
+        if (!clipboardRaw) return;
+
+        const clipboardData = JSON.parse(clipboardRaw);
+        if (Object.keys(clipboardData).length === 0) return;
+
+        const copiedIds = Object.keys(clipboardData);
+        let minColIdx = Infinity, maxColIdx = -Infinity;
+        let minRow = Infinity, maxRow = -Infinity;
+
+        copiedIds.forEach(id => {
+            const match = id.match(/^([A-Z]+)(\d+)$/);
+            if (match) {
+                const colIdx = getColIdx(match[1]);
+                const row = parseInt(match[2]);
+                minColIdx = Math.min(minColIdx, colIdx);
+                maxColIdx = Math.max(maxColIdx, colIdx);
+                minRow = Math.min(minRow, row);
+                maxRow = Math.max(maxRow, row);
+            }
+        });
+
+        const startColIdx = getColIdx(anchorCell.col);
+        const startRow = anchorCell.row;
+
+        for (let colOffset = 0; colOffset <= (maxColIdx - minColIdx); colOffset++) {
+            const sourceColIdx = minColIdx + colOffset;
+            const sourceCol = getColLabel(sourceColIdx);
+            const targetColIdx = startColIdx + colOffset;
+            if (targetColIdx >= colsCount) continue;
+            const targetCol = getColLabel(targetColIdx);
+
+            for (let rowOffset = 0; rowOffset <= (maxRow - minRow); rowOffset++) {
+                const sourceRow = minRow + rowOffset;
+                const targetRow = startRow + rowOffset;
+                if (targetRow > rowsCount) continue;
+
+                const sourceId = `${sourceCol}${sourceRow}`;
+                const targetId = `${targetCol}${targetRow}`;
+
+                if (clipboardData[sourceId]) {
+                    dispatch(updateCell({
+                        id: targetId,
+                        value: { ...clipboardData[sourceId] }
+                    }));
+                }
+            }
+        }
+        isDirty.current = true;
+    };
+
+    const selectAll = () => {
+        setAnchorCell({ col: 'A', row: 1 });
+        setFocusCell({ col: getColLabel(colsCount - 1), row: rowsCount });
+    };
+
+    const navigateCell = (direction: 'up' | 'down' | 'left' | 'right') => {
+        if (!anchorCell) return;
+
+        let newCol = anchorCell.col;
+        let newRow = anchorCell.row;
+        let colIdx = getColIdx(anchorCell.col);
+
+        switch (direction) {
+            case 'up':
+                newRow = Math.max(1, anchorCell.row - 1);
+                break;
+            case 'down':
+                newRow = Math.min(rowsCount, anchorCell.row + 1);
+                break;
+            case 'left':
+                colIdx = Math.max(0, colIdx - 1);
+                newCol = getColLabel(colIdx);
+                break;
+            case 'right':
+                colIdx = Math.min(colsCount - 1, colIdx + 1);
+                newCol = getColLabel(colIdx);
+                break;
+        }
+
+        setAnchorCell({ col: newCol, row: newRow });
+        setFocusCell({ col: newCol, row: newRow });
+        setIsEditing(false);
+    };
+
+    const saveToServer = async () => {
+        if (!activeDocId) return;
+
+        setSaveStatus('saving');
+        try {
+            await dispatch(updateDocumentThunk({
+                id: activeDocId,
+                data: data
+            })).unwrap();
+            setSaveStatus('saved');
+            isDirty.current = false;
+        } catch (err) {
+            setSaveStatus('error');
+            console.error('Ошибка сохранения:', err);
+        }
+    };
+
     useEffect(() => {
         if (initialDoc.data) {
             dispatch(setInitialData(initialDoc.data));
@@ -68,55 +266,22 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => 
     useEffect(() => {
         if (!activeDocId) return;
 
-        const saveData = async () => {
-            setSaveStatus('saving');
-            try {
-                await dispatch(updateDocumentThunk({
-                    id: activeDocId,
-                    data: data
-                })).unwrap();
-                setSaveStatus('saved');
-                isDirty.current = false;
-            } catch (err) {
-                setSaveStatus('error');
-                console.error('Ошибка сохранения:', err);
-            }
-        };
+        if (saveTimerRef.current) {
+            clearTimeout(saveTimerRef.current);
+        }
 
         if (isDirty.current) {
-            const timer = setTimeout(saveData, 500);
-            return () => clearTimeout(timer);
+            saveTimerRef.current = setTimeout(() => {
+                saveToServer();
+            }, 500);
         }
-    }, [data, activeDocId, dispatch]);
 
-    useEffect(() => {
-        if (isEditing && inputRef.current) {
-            inputRef.current.focus();
-        }
-    }, [isEditing]);
-
-    useEffect(() => {
-        const handleUndoRedo = (e: KeyboardEvent) => {
-            if (isEditing) return;
-
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
-                e.preventDefault();
-                if (e.shiftKey) {
-                    dispatch(redo());
-                } else {
-                    dispatch(undo());
-                }
-            }
-
-            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
-                e.preventDefault();
-                dispatch(redo());
+        return () => {
+            if (saveTimerRef.current) {
+                clearTimeout(saveTimerRef.current);
             }
         };
-
-        window.addEventListener('keydown', handleUndoRedo);
-        return () => window.removeEventListener('keydown', handleUndoRedo);
-    }, [dispatch, isEditing]);
+    }, [data, activeDocId]);
 
     useEffect(() => {
         const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -130,15 +295,159 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => 
     }, []);
 
     useEffect(() => {
-        const handleKeyDown = (e: KeyboardEvent) => {
+        if (isEditing && inputRef.current) {
+            inputRef.current.focus();
+        }
+    }, [isEditing]);
+
+    useEffect(() => {
+        const handleSaveShortcut = (e: KeyboardEvent) => {
             if ((e.ctrlKey || e.metaKey) && e.key === 's') {
                 e.preventDefault();
-                onAutoSave(data);
+                saveToServer();
             }
         };
-        window.addEventListener('keydown', handleKeyDown);
-        return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [data, onAutoSave]);
+        window.addEventListener('keydown', handleSaveShortcut);
+        return () => window.removeEventListener('keydown', handleSaveShortcut);
+    }, [data]);
+
+    useEffect(() => {
+        const handleGlobalKeyDown = (e: KeyboardEvent) => {
+            if (isEditing) {
+                if (e.key === 'Escape') {
+                    setIsEditing(false);
+                    e.preventDefault();
+                }
+                return;
+            }
+
+            if (e.ctrlKey || e.metaKey) {
+                switch (e.key.toLowerCase()) {
+                    case 's':
+                        e.preventDefault();
+                        saveToServer();
+                        break;
+                    case 'z':
+                        e.preventDefault();
+                        if (e.shiftKey) {
+                            dispatch(redo());
+                        } else {
+                            dispatch(undo());
+                        }
+                        break;
+                    case 'y':
+                        e.preventDefault();
+                        dispatch(redo());
+                        break;
+                    case 'c':
+                        e.preventDefault();
+                        copySelection();
+                        break;
+                    case 'x':
+                        e.preventDefault();
+                        cutSelection();
+                        break;
+                    case 'v':
+                        e.preventDefault();
+                        pasteFromClipboard();
+                        break;
+                    case 'a':
+                        e.preventDefault();
+                        selectAll();
+                        break;
+                    case 'b':
+                        e.preventDefault();
+                        if (anchorCell) {
+                            const currentBold = data[`${anchorCell.col}${anchorCell.row}`]?.style?.bold;
+                            const range = getSelectionRange();
+                            if (range) {
+                                dispatch(applyStyleToSelection({
+                                    selection: range,
+                                    style: { bold: !currentBold }
+                                }));
+                                isDirty.current = true;
+                            }
+                        }
+                        break;
+                    case 'i':
+                        e.preventDefault();
+                        if (anchorCell) {
+                            const currentItalic = data[`${anchorCell.col}${anchorCell.row}`]?.style?.italic;
+                            const range = getSelectionRange();
+                            if (range) {
+                                dispatch(applyStyleToSelection({
+                                    selection: range,
+                                    style: { italic: !currentItalic }
+                                }));
+                                isDirty.current = true;
+                            }
+                        }
+                        break;
+                    case 'u':
+                        e.preventDefault();
+                        if (anchorCell) {
+                            const currentUnderline = data[`${anchorCell.col}${anchorCell.row}`]?.style?.underline;
+                            const range = getSelectionRange();
+                            if (range) {
+                                dispatch(applyStyleToSelection({
+                                    selection: range,
+                                    style: { underline: !currentUnderline }
+                                }));
+                                isDirty.current = true;
+                            }
+                        }
+                        break;
+                }
+                return;
+            }
+
+            switch (e.key) {
+                case 'ArrowUp':
+                    e.preventDefault();
+                    navigateCell('up');
+                    break;
+                case 'ArrowDown':
+                    e.preventDefault();
+                    navigateCell('down');
+                    break;
+                case 'ArrowLeft':
+                    e.preventDefault();
+                    navigateCell('left');
+                    break;
+                case 'ArrowRight':
+                    e.preventDefault();
+                    navigateCell('right');
+                    break;
+                case 'Tab':
+                    e.preventDefault();
+                    if (e.shiftKey) {
+                        navigateCell('left');
+                    } else {
+                        navigateCell('right');
+                    }
+                    break;
+                case 'Enter':
+                    e.preventDefault();
+                    if (anchorCell) {
+                        setEditValue(data[`${anchorCell.col}${anchorCell.row}`]?.rawContent || '');
+                        setIsEditing(true);
+                    }
+                    break;
+                case 'Delete':
+                case 'Backspace':
+                    e.preventDefault();
+                    clearSelection();
+                    break;
+                case 'Escape':
+                    setAnchorCell(null);
+                    setFocusCell(null);
+                    break;
+            }
+        };
+
+        window.addEventListener('keydown', handleGlobalKeyDown);
+        return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+    }, [dispatch, isEditing, anchorCell, focusCell, data, colsCount, rowsCount]);
 
     const saveEdit = (col: string, row: number) => {
         const id = `${col}${row}`;
@@ -155,7 +464,6 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => 
         };
 
         dispatch(updateCell({ id, value: newCell }));
-
         isDirty.current = true;
         setIsEditing(false);
     };
@@ -373,15 +681,24 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => 
                         const cell = data[id];
                         const inSelection = checkSelection.isIn(col, rowNum);
 
+                        const displayValue = cell
+                            ? formatValueByType(cell.value, cell.style?.numberFormat)
+                            : '';
+
                         return (
                             <div
                                 key={id}
-                                className={`cell ${inSelection ? 'cell-in-selection' : ''} ${isAnchor ? 'anchor' : ''}`}
+                                className={`cell ${inSelection ? 'cell-in-selection' : ''} ${isAnchor ? 'anchor' : ''} ${cell?.style?.textAlign === 'center' ? 'cell-align-center' :
+                                    cell?.style?.textAlign === 'right' ? 'cell-align-right' : 'cell-align-left'
+                                    }`}
                                 style={{
                                     width: colWidths[col] || DEFAULT_COL_WIDTH,
                                     height: h,
                                     fontWeight: cell?.style?.bold ? 'bold' : 'normal',
-                                    fontStyle: cell?.style?.italic ? 'italic' : 'normal'
+                                    fontStyle: cell?.style?.italic ? 'italic' : 'normal',
+                                    textDecoration: cell?.style?.underline ? 'underline' : 'none',
+                                    backgroundColor: cell?.style?.backgroundColor || 'transparent',
+                                    color: cell?.style?.textColor || 'inherit'
                                 }}
                                 onMouseDown={(e) => {
                                     if (e.shiftKey && anchorCell) {
@@ -407,7 +724,11 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => 
                                         onKeyDown={ev => ev.key === 'Enter' && saveEdit(col, rowNum)}
                                     />
                                 ) : (
-                                    <div className="cell-content">{cell ? String(cell.value) : ''}</div>
+                                    <div className={`cell-content ${cell?.style?.textAlign === 'center' ? 'text-center' :
+                                        cell?.style?.textAlign === 'right' ? 'text-right' : 'text-left'
+                                        }`}>
+                                        {displayValue}
+                                    </div>
                                 )}
                             </div>
                         );
@@ -416,20 +737,15 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => 
             );
         }
         return rows;
-    }, [startIndex, endIndex, data, anchorCell, isEditing, editValue, colWidths, rowHeights, rowOffsets, checkSelection, dynamicColLabels]);
+    }, [startIndex, endIndex, data, anchorCell, focusCell, isEditing, editValue, colWidths, rowHeights, rowOffsets, checkSelection, dynamicColLabels]);
 
     return (
-        <div className="spreadsheet-wrapper" tabIndex={0} onKeyDown={e => {
-            if (!isEditing && e.key === 'Enter' && anchorCell) {
-                setEditValue(data[`${anchorCell.col}${anchorCell.row}`]?.rawContent || '');
-                setIsEditing(true);
-            }
-        }}>
+        <div className="spreadsheet-wrapper" tabIndex={0}>
             <div className="top-nav-panel">
                 <div className="doc-info-block">
                     <span className="doc-main-title">{initialDoc.title}</span>
                     <span className={`save-status ${saveStatus}`}>
-                        {saveStatus === 'saving' ? '● Сохранение...' : '✓ Сохранено'}
+                        {saveStatus === 'saving' ? '● Сохранение...' : saveStatus === 'error' ? '✗ Ошибка' : '✓ Сохранено'}
                     </span>
                 </div>
                 <div className="nav-actions">
@@ -446,6 +762,11 @@ const Spreadsheet: React.FC<SpreadsheetProps> = ({ initialDoc, onAutoSave }) => 
                     onChange={e => { setEditValue(e.target.value); setIsEditing(true); }}
                 />
             </div>
+
+            <FormattingToolbar
+                selectedCell={anchorCell}
+                selectionRange={getSelectionRange()}
+            />
 
             <div className="spreadsheet-container" onScroll={e => setScrollTop(e.currentTarget.scrollTop)}>
                 <div style={{ height: rowOffsets[rowsCount] + HEADER_HEIGHT + 100, position: 'relative', width: 'fit-content' }}>

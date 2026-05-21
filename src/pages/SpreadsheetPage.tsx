@@ -49,7 +49,6 @@ const SpreadsheetPage = () => {
             <ConfirmNavigation />
             <Spreadsheet
                 initialDoc={currentDoc}
-                onAutoSave={() => { }}
             />
         </div>
     );

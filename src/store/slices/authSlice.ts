@@ -90,6 +90,67 @@ export const deleteAccount = createAsyncThunk(
     }
 );
 
+export const updateProfile = createAsyncThunk(
+    'auth/updateProfile',
+    async ({ name }: { name: string }, { getState, rejectWithValue }) => {
+        const state = getState() as RootState;
+        const user = state.auth.user;
+
+        if (!user) {
+            return rejectWithValue('Not authenticated');
+        }
+
+        try {
+            const users = JSON.parse(localStorage.getItem('mock_users') || '[]');
+            const userIndex = users.findIndex((u: any) => u.id === user.id);
+
+            if (userIndex === -1) {
+                throw new Error('User not found');
+            }
+
+            users[userIndex] = { ...users[userIndex], name };
+            localStorage.setItem('mock_users', JSON.stringify(users));
+
+            return { ...user, name };
+        } catch (error: any) {
+            return rejectWithValue(error.message);
+        }
+    }
+);
+
+export const changePassword = createAsyncThunk(
+    'auth/changePassword',
+    async ({ currentPassword, newPassword }: { currentPassword: string; newPassword: string },
+        { getState, rejectWithValue }) => {
+        const state = getState() as RootState;
+        const user = state.auth.user;
+
+        if (!user) {
+            return rejectWithValue('Not authenticated');
+        }
+
+        try {
+            const users = JSON.parse(localStorage.getItem('mock_users') || '[]');
+            const userIndex = users.findIndex((u: any) => u.id === user.id);
+
+            if (userIndex === -1) {
+                throw new Error('User not found');
+            }
+
+            if (users[userIndex].password !== currentPassword) {
+                throw new Error('Неверный текущий пароль');
+            }
+
+            users[userIndex] = { ...users[userIndex], password: newPassword };
+            localStorage.setItem('mock_users', JSON.stringify(users));
+
+            return;
+        } catch (error: any) {
+            return rejectWithValue(error.message);
+        }
+    }
+);
+
 const initialState: AuthState = {
     user: null,
     accessToken: null,
@@ -166,6 +227,29 @@ const authSlice = createSlice({
                 state.isLoading = false;
             })
             .addCase(deleteAccount.rejected, (state, action) => {
+                state.isLoading = false;
+                state.error = action.payload as string;
+            })
+            .addCase(updateProfile.pending, (state) => {
+                state.isLoading = true;
+                state.error = null;
+            })
+            .addCase(updateProfile.fulfilled, (state, action) => {
+                state.user = action.payload;
+                state.isLoading = false;
+            })
+            .addCase(updateProfile.rejected, (state, action) => {
+                state.isLoading = false;
+                state.error = action.payload as string;
+            })
+            .addCase(changePassword.pending, (state) => {
+                state.isLoading = true;
+                state.error = null;
+            })
+            .addCase(changePassword.fulfilled, (state) => {
+                state.isLoading = false;
+            })
+            .addCase(changePassword.rejected, (state, action) => {
                 state.isLoading = false;
                 state.error = action.payload as string;
             });

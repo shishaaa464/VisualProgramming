@@ -98,7 +98,8 @@
     overflow: hidden;
     text-overflow: ellipsis;
     user-select: none;
-    pointer-events: none;
+    width: 100%;
+    text-align: inherit !important;
 }
 
 .cell-input {
@@ -171,4 +172,16 @@
     width: 100%;
     height: 4px;
     cursor: row-resize;
+}
+
+.spreadsheet-row .cell .cell-content.text-left {
+    text-align: left !important;
+}
+
+.spreadsheet-row .cell .cell-content.text-center {
+    text-align: center !important;
+}
+
+.spreadsheet-row .cell .cell-content.text-right {
+    text-align: right !important;
 }
